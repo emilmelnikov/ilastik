@@ -1,0 +1,87 @@
+name: Main workflow
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+jobs:
+  style:
+    name: Check code style
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Fetch main branch
+        run: git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1
+          origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Install black
+        run: pip install black
+
+      - name: Check code style
+        shell: bash
+        run: git diff -z --name-only --diff-filter=ACMR main... -- '***.py' |
+          xargs -0 -P 0 black --check
+
+  tests:
+    name: Run tests
+    strategy:
+      matrix:
+        os: [ubuntu-20.04]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout ilastik
+        uses: actions/checkout@v2
+        with:
+          repository: ilastik/ilastik
+          path: ilastik
+
+      - name: Checkout volumina
+        uses: actions/checkout@v2
+        with:
+          repository: ilastik/volumina
+          path: volumina
+
+      - name: Checkout ilastik-conda-recipes
+        uses: actions/checkout@v2
+        with:
+          repository: ilastik/ilastik-conda-recipes
+          path: ilastik-conda-recipes
+
+      - name: Get the most recent commit to the recipes repository
+        id: recipes-commit
+        shell: bash
+        run: echo "::set-output name=hash::$(git -C ilastik-conda-recipes rev-parse HEAD)"
+
+      - name: Setup cache
+        uses: actions/cache@v2
+        with:
+          path: ~/conda_pkgs_dir
+          key: ${{ runner.os }}-conda-${{ steps.recipes-commit.outputs.hash }}
+          restore-keys: ${{ runner.os }}-conda-
+
+      - name: Setup conda
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          activate-environment: ""
+          auto-activate-base: true
+          channel-priority: strict
+          channels: ilastik-forge,conda-forge
+          use-only-tar-bz2: true
+
+      - name: Install conda-build
+        run: conda install --name base conda-build
+
+      - name: Create conda environment
+        shell: bash
+        run: python3 ilastik/scripts/devenv.py create
+          --quiet --channel ilastik-forge --channel conda-forge
+          ilastik-dependencies-no-solvers pre-commit mpi4py pytest-cov
+
+      - name: Run tests
+        run: xvfb-run --server-args='-screen 0 1024x768x24'
+          conda run --name ilastik --cwd ilastik --live-stream
+          pytest --cov-report=xml --cov=lazyflow --cov=ilastik --run-legacy-gui

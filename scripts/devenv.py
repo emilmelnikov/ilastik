@@ -20,7 +20,10 @@ DEFAULT_CREATE_ARGS = [
     "ilastik-forge",
     "--channel",
     "conda-forge",
+    "--channel",
+    "nodefaults",
     "ilastik-dependencies-no-solvers",
+    "conda-build",
     "pre-commit",
 ]
 
@@ -51,31 +54,34 @@ def main():
     args, rest = ap.parse_known_args()
 
     if not all(map(shutil.which, EXECUTABLES)):
-        sys.exit("the following executables should exist in the system path: " + str(EXECUTABLES)[1:-1])
+        return "the following executables should exist in the system path: " + str(EXECUTABLES)[1:-1]
 
     if not all(map(is_git_repo, REPOSITORIES)):
-        sys.exit("the following directories should be valid git repositories: " + str(REPOSITORIES)[1:-1])
+        return "the following directories should be valid git repositories: " + str(REPOSITORIES)[1:-1]
 
     logging.info("command %r started", args.cmd)
     time_start = time.perf_counter()
 
     try:
         args.func(args, rest)
+        return 0
     except subprocess.CalledProcessError:
         logging.error("command %r failed", args.cmd)
+        return 1
     except KeyboardInterrupt:
         logging.error("command %r interrupted", args.cmd)
+        return 1
     else:
         logging.info("command %r completed", args.cmd)
-
-    time_end = time.perf_counter()
-    logging.info("elapsed time: %.3f seconds", time_end - time_start)
+        return 1
+    finally:
+        time_end = time.perf_counter()
+        logging.info("elapsed time: %.3f seconds", time_end - time_start)
 
 
 def cmd_create(args, rest):
     chan_args = ["--override-channels", "--strict-channel-priority"]
     run(["conda", "create", "--yes", "--name", args.name] + chan_args + (rest or DEFAULT_CREATE_ARGS))
-    run(["conda", "install", "--yes", "--name", args.name] + chan_args + ["--channel", "conda-forge", "conda-build"])
 
     for repo in REPOSITORIES:
         run(["conda", "develop", "--name", args.name, repo])
@@ -103,4 +109,4 @@ def is_git_repo(cwd):
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
